@@ -13,11 +13,26 @@ from ta.trend import EMAIndicator
 
 @st.cache_data(show_spinner=True)
 def fetch_yf_data(ticker='BTC-USD', interval='15m', start_date=None, end_date=None):
-    df = yf.download(ticker, start=start_date, end=end_date + datetime.timedelta(days=1), interval=interval, progress=False)
-    df = df.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"})
-    df = df.reset_index()
-    df = df[['Datetime', 'open', 'high', 'low', 'close', 'volume']]
-    df = df.rename(columns={'Datetime': 'timestamp'})
+    df = yf.download(
+        ticker,
+        start=start_date,
+        end=end_date + datetime.timedelta(days=1),
+        interval=interval,
+        progress=False
+    )
+
+    if df.empty:
+        return df  # retorna vazio e será tratado depois
+
+    df.reset_index(inplace=True)
+    # Lida com Date ou Datetime como índice
+    if 'Date' in df.columns:
+        df = df.rename(columns={'Date': 'timestamp'})
+    elif 'Datetime' in df.columns:
+        df = df.rename(columns={'Datetime': 'timestamp'})
+
+    df = df[['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']].copy()
+    df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
     return df
 
 # ==========================
