@@ -12,7 +12,7 @@ from ta.trend import EMAIndicator
 # ==========================
 
 @st.cache_data(show_spinner=True)
-def fetch_yf_data(ticker='BTC-USD', interval='15m', start_date=None, end_date=None):
+def fetch_yf_data(ticker='BTC-USD', interval='1m', start_date=None, end_date=None):
     df = yf.download(
         ticker,
         start=start_date,
