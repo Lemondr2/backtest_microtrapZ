@@ -25,8 +25,13 @@ def fetch_yf_data(ticker='BTC-USD', interval='15m', start_date=None, end_date=No
 # ==========================
 
 def apply_indicators(df, atr_period=9, ema_short=8, ema_long=20):
-    df['ema_short'] = EMAIndicator(df['close'], window=ema_short).ema_indicator()
-    df['ema_long'] = EMAIndicator(df['close'], window=ema_long).ema_indicator()
+    if df.empty or 'close' not in df.columns or df['close'].isnull().all():
+        raise ValueError("Dados inválidos para aplicar indicadores.")
+    
+    df = df.copy()
+    df['ema_short'] = EMAIndicator(df['close'].fillna(method="ffill"), window=ema_short).ema_indicator()
+    df['ema_long'] = EMAIndicator(df['close'].fillna(method="ffill"), window=ema_long).ema_indicator()
+    
     atr = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=atr_period)
     df['atr'] = atr.average_true_range()
     return df
@@ -119,37 +124,40 @@ if st.button("🚀 Rodar Backtest"):
     with st.spinner("Carregando dados e executando..."):
         df = fetch_yf_data(ticker=ticker, start_date=start_date, end_date=end_date)
 
-        # ✅ Validação dos dados
-        if df.empty or not all(col in df.columns for col in ['open', 'high', 'low', 'close']):
-            st.error("❌ Falha ao carregar dados. Verifique o ticker ou o período selecionado.")
+        if df.empty or not all(col in df.columns for col in ['open', 'high', 'low', 'close']) or df['close'].isnull().all():
+            st.error("❌ Dados insuficientes ou inválidos. Tente outro período ou ativo.")
         else:
-            df = apply_indicators(df, atr_period=atr_period, ema_short=ema_short, ema_long=ema_long)
-            results = backtest(df, risk=risk, rr=rr)
+            try:
+                df = apply_indicators(df, atr_period=atr_period, ema_short=ema_short, ema_long=ema_long)
+                results = backtest(df, risk=risk, rr=rr)
 
-            if not results.empty:
-                total_trades = len(results)
-                net_profit = round(results['pnl'].sum(), 2)
-                wins = results[results['pnl'] > 0]
-                losses = results[results['pnl'] < 0]
-                winrate = round((len(wins) / total_trades) * 100, 2) if total_trades > 0 else 0
-                avg_win = wins['pnl'].mean() if not wins.empty else 0
-                avg_loss = abs(losses['pnl'].mean()) if not losses.empty else 0
-                payoff = round(avg_win / avg_loss, 2) if avg_loss > 0 else 0
+                if not results.empty:
+                    total_trades = len(results)
+                    net_profit = round(results['pnl'].sum(), 2)
+                    wins = results[results['pnl'] > 0]
+                    losses = results[results['pnl'] < 0]
+                    winrate = round((len(wins) / total_trades) * 100, 2) if total_trades > 0 else 0
+                    avg_win = wins['pnl'].mean() if not wins.empty else 0
+                    avg_loss = abs(losses['pnl'].mean()) if not losses.empty else 0
+                    payoff = round(avg_win / avg_loss, 2) if avg_loss > 0 else 0
 
-                st.success(f"""
+                    st.success(f"""
 ✅ Total de operações: {total_trades}  
 💰 Lucro líquido: {net_profit} USD  
 🏆 Winrate: {winrate}%  
 📊 Payoff: {payoff}
 """)
 
-                st.plotly_chart(plot_equity_curve(results), use_container_width=True)
-                st.subheader("📈 Operações Executadas")
-                st.dataframe(results)
+                    st.plotly_chart(plot_equity_curve(results), use_container_width=True)
+                    st.subheader("📈 Operações Executadas")
+                    st.dataframe(results)
 
-                csv = results.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Baixar CSV", data=csv, file_name="backtest_microtrap.csv", mime='text/csv')
-            else:
-                st.warning("Nenhuma operação encontrada com os parâmetros definidos.")
+                    csv = results.to_csv(index=False).encode('utf-8')
+                    st.download_button("📥 Baixar CSV", data=csv, file_name="backtest_microtrap.csv", mime='text/csv')
+                else:
+                    st.warning("Nenhuma operação encontrada com os parâmetros definidos.")
+
+            except Exception as e:
+                st.error(f"❌ Erro ao aplicar indicadores ou rodar o backtest: {e}")
 else:
     st.info("Configure os parâmetros e clique em **Rodar Backtest**.")
