@@ -124,14 +124,15 @@ if st.button("🚀 Rodar Backtest"):
     with st.spinner("Carregando dados e executando..."):
         df = fetch_yf_data(ticker=ticker, start_date=start_date, end_date=end_date)
 
-        # Validação segura
-        columns_ok = all(col in df.columns for col in ['open', 'high', 'low', 'close'])
-        close_ok = columns_ok and not df['close'].isnull().all()
-
-        if df.empty or not columns_ok or not close_ok:
-            st.error("❌ Dados insuficientes ou inválidos. Tente outro período ou ativo.")
-        else:
-            try:
+        # Validações seguras
+        try:
+            if df.empty:
+                st.error("❌ Nenhum dado retornado para o período/ativo escolhido.")
+            elif not all(col in df.columns for col in ['open', 'high', 'low', 'close']):
+                st.error("❌ Colunas obrigatórias ausentes nos dados.")
+            elif df['close'].isnull().all():
+                st.error("❌ Todos os valores da coluna 'close' são nulos. Tente outro período ou ativo.")
+            else:
                 df = apply_indicators(df, atr_period=atr_period, ema_short=ema_short, ema_long=ema_long)
                 results = backtest(df, risk=risk, rr=rr)
 
@@ -160,8 +161,7 @@ if st.button("🚀 Rodar Backtest"):
                     st.download_button("📥 Baixar CSV", data=csv, file_name="backtest_microtrap.csv", mime='text/csv')
                 else:
                     st.warning("Nenhuma operação encontrada com os parâmetros definidos.")
-
-            except Exception as e:
-                st.error(f"❌ Erro ao aplicar indicadores ou rodar o backtest: {e}")
+        except Exception as e:
+            st.error(f"❌ Erro inesperado: {e}")
 else:
     st.info("Configure os parâmetros e clique em **Rodar Backtest**.")
