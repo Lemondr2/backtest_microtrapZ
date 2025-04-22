@@ -1,5 +1,5 @@
 import streamlit as st
-import ccxt
+import yfinance as yf
 import pandas as pd
 import numpy as np
 import datetime
@@ -7,27 +7,22 @@ import plotly.graph_objects as go
 from ta.volatility import AverageTrueRange
 from ta.trend import EMAIndicator
 
+# ==========================
+# Coleta de dados com yfinance
+# ==========================
+
 @st.cache_data(show_spinner=True)
-def fetch_binance_data(symbol='BTC/USDT', timeframe='1m', start_date=None, end_date=None):
-    exchange = ccxt.binance()
-    since = exchange.parse8601(start_date.strftime('%Y-%m-%dT%H:%M:%S'))
-    end_timestamp = exchange.parse8601(end_date.strftime('%Y-%m-%dT%H:%M:%S'))
-    all_candles = []
-    limit = 1000
-
-    while since < end_timestamp:
-        candles = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=limit)
-        if not candles:
-            break
-        since = candles[-1][0] + 60 * 1000
-        all_candles += candles
-        if len(candles) < limit:
-            break
-
-    df = pd.DataFrame(all_candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df = df[(df['timestamp'] >= pd.to_datetime(start_date)) & (df['timestamp'] <= pd.to_datetime(end_date))]
+def fetch_yf_data(ticker='BTC-USD', interval='15m', start_date=None, end_date=None):
+    df = yf.download(ticker, start=start_date, end=end_date + datetime.timedelta(days=1), interval=interval, progress=False)
+    df = df.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"})
+    df = df.reset_index()
+    df = df[['Datetime', 'open', 'high', 'low', 'close', 'volume']]
+    df = df.rename(columns={'Datetime': 'timestamp'})
     return df
+
+# ==========================
+# Indicadores e Estratégia
+# ==========================
 
 def apply_indicators(df, atr_period=9, ema_short=8, ema_long=20):
     df['ema_short'] = EMAIndicator(df['close'], window=ema_short).ema_indicator()
@@ -95,21 +90,22 @@ def plot_equity_curve(df):
     df['capital'] = capital + df['pnl'].cumsum()
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df['timestamp'], y=df['capital'], mode='lines+markers', name='Capital'))
-    fig.update_layout(title='Evolução do Capital', xaxis_title='Data', yaxis_title='Capital (USDT)')
+    fig.update_layout(title='Evolução do Capital', xaxis_title='Data', yaxis_title='Capital (USD)')
     return fig
 
 # ==========================
 # Streamlit App
 # ==========================
 
-st.set_page_config(page_title="Backtest Microtrap", layout="wide")
-st.title("📊 Backtest: Estratégia Microtrap")
-st.markdown("💡 Estratégia baseada em price action (microtrap), médias móveis e ATR.")
+st.set_page_config(page_title="Backtest Microtrap - yFinance", layout="wide")
+st.title("📊 Backtest: Estratégia Microtrap com yFinance")
+st.markdown("💡 Estratégia baseada em price action (microtrap), médias móveis e ATR. Usando dados do Yahoo Finance.")
 
+# Sidebar de configurações
 with st.sidebar:
     st.header("⚙️ Configurações")
-    symbol = st.selectbox("Par de Moeda", ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'])
-    start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=90))
+    ticker = st.selectbox("Ativo", ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
+    start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=60))
     end_date = st.date_input("Data Final", datetime.date.today())
 
     atr_period = st.slider("Período ATR", 5, 20, 9)
@@ -118,9 +114,10 @@ with st.sidebar:
     risk = st.slider("Risco por Trade (%)", 0.5, 5.0, 1.0) / 100
     rr = st.slider("Razão Risco/Retorno", 0.5, 3.0, 0.8)
 
+# Executar backtest
 if st.button("🚀 Rodar Backtest"):
-    with st.spinner("Buscando dados e executando backtest..."):
-        df = fetch_binance_data(symbol=symbol, start_date=start_date, end_date=end_date)
+    with st.spinner("Carregando dados e executando..."):
+        df = fetch_yf_data(ticker=ticker, start_date=start_date, end_date=end_date)
         df = apply_indicators(df, atr_period=atr_period, ema_short=ema_short, ema_long=ema_long)
         results = backtest(df, risk=risk, rr=rr)
 
@@ -136,7 +133,7 @@ if st.button("🚀 Rodar Backtest"):
 
             st.success(f"""
 ✅ Total de operações: {total_trades}  
-💰 Lucro líquido: {net_profit} USDT  
+💰 Lucro líquido: {net_profit} USD  
 🏆 Winrate: {winrate}%  
 📊 Payoff: {payoff}
 """)
@@ -148,7 +145,6 @@ if st.button("🚀 Rodar Backtest"):
             csv = results.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Baixar CSV", data=csv, file_name="backtest_microtrap.csv", mime='text/csv')
         else:
-            st.warning("Nenhuma operação encontrada com os parâmetros atuais.")
+            st.warning("Nenhuma operação encontrada com os parâmetros definidos.")
 else:
-    st.info("Configure os parâmetros no menu lateral e clique em **Rodar Backtest**.")
-
+    st.info("Configure os parâmetros e clique em **Rodar Backtest**.")
