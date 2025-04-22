@@ -124,7 +124,11 @@ if st.button("🚀 Rodar Backtest"):
     with st.spinner("Carregando dados e executando..."):
         df = fetch_yf_data(ticker=ticker, start_date=start_date, end_date=end_date)
 
-        if df.empty or not all(col in df.columns for col in ['open', 'high', 'low', 'close']) or df['close'].isnull().all():
+        # Validação segura
+        columns_ok = all(col in df.columns for col in ['open', 'high', 'low', 'close'])
+        close_ok = columns_ok and not df['close'].isnull().all()
+
+        if df.empty or not columns_ok or not close_ok:
             st.error("❌ Dados insuficientes ou inválidos. Tente outro período ou ativo.")
         else:
             try:
