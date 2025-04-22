@@ -12,7 +12,7 @@ from ta.trend import EMAIndicator
 # ==========================
 
 @st.cache_data(show_spinner=True)
-def fetch_yf_data(ticker='BTC-USD', interval='1m', start_date=None, end_date=None):
+def fetch_yf_data(ticker='BTC-USD', interval='15m', start_date=None, end_date=None):
     df = yf.download(
         ticker,
         start=start_date,
@@ -22,10 +22,9 @@ def fetch_yf_data(ticker='BTC-USD', interval='1m', start_date=None, end_date=Non
     )
 
     if df.empty:
-        return df  # retorna vazio e será tratado depois
+        return df
 
     df.reset_index(inplace=True)
-    # Lida com Date ou Datetime como índice
     if 'Date' in df.columns:
         df = df.rename(columns={'Date': 'timestamp'})
     elif 'Datetime' in df.columns:
@@ -125,7 +124,9 @@ st.markdown("💡 Estratégia baseada em price action (microtrap), médias móve
 with st.sidebar:
     st.header("⚙️ Configurações")
     ticker = st.selectbox("Ativo", ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
-    start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=60))
+    interval = st.selectbox("Tempo Gráfico", ['1m', '5m', '15m', '30m', '1h', '1d'], index=2)
+
+    start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=30))
     end_date = st.date_input("Data Final", datetime.date.today())
 
     atr_period = st.slider("Período ATR", 5, 20, 9)
@@ -134,12 +135,14 @@ with st.sidebar:
     risk = st.slider("Risco por Trade (%)", 0.5, 5.0, 1.0) / 100
     rr = st.slider("Razão Risco/Retorno", 0.5, 3.0, 0.8)
 
+    if interval in ['1m', '5m', '15m']:
+        st.caption("⚠️ Intervalos intradiários possuem no máximo 30 dias de histórico.")
+
 # Executar backtest
 if st.button("🚀 Rodar Backtest"):
     with st.spinner("Carregando dados e executando..."):
-        df = fetch_yf_data(ticker=ticker, start_date=start_date, end_date=end_date)
+        df = fetch_yf_data(ticker=ticker, interval=interval, start_date=start_date, end_date=end_date)
 
-        # Validações seguras
         try:
             if df.empty:
                 st.error("❌ Nenhum dado retornado para o período/ativo escolhido.")
