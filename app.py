@@ -134,7 +134,7 @@ st.title("📊 Backtest: Estratégia RSI 3 + EMAs")
 # ========== Sidebar ==========
 with st.sidebar:
     st.header("⚙️ Parâmetros")
-    ticker = st.selectbox("Par", ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
+    ticker = st.selectbox("Par", ['BTC-USD', 'BNB-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
     interval = st.selectbox("Tempo Gráfico", ['5m', '15m', '1h', '4h', '1d'], index=3)
     start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=30))
     end_date = st.date_input("Data Final", datetime.date.today())
