@@ -1,32 +1,32 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 import numpy as np
 import datetime
 import plotly.graph_objects as go
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator
+import ccxt
+import time
 
-# ========== Coleta de dados ==========
+# ========== Coleta de dados da Binance via CCXT ==========
 @st.cache_data(show_spinner=True)
-def fetch_data(ticker, start_date, end_date, interval):
-    df = yf.download(
-        ticker,
-        start=start_date,
-        end=end_date + datetime.timedelta(days=1),
-        interval=interval,
-        progress=False
-    )
-    if df.empty:
-        return df
-    df.reset_index(inplace=True)
-    if 'Datetime' in df.columns:
-        df.rename(columns={'Datetime': 'timestamp'}, inplace=True)
-    elif 'Date' in df.columns:
-        df.rename(columns={'Date': 'timestamp'}, inplace=True)
+def fetch_binance_ohlcv(symbol='BTC/USDT', interval='1h', start_date=None, end_date=None):
+    exchange = ccxt.binance()
+    since = exchange.parse8601(f'{start_date.isoformat()}T00:00:00Z')
+    now = exchange.parse8601(f'{end_date.isoformat()}T00:00:00Z')
+    ohlcv = []
 
-    df = df[['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']].copy()
-    df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+    limit = 1000  # candles por chamada
+    while since < now:
+        batch = exchange.fetch_ohlcv(symbol, timeframe=interval, since=since, limit=limit)
+        if not batch:
+            break
+        ohlcv += batch
+        since = batch[-1][0] + 1
+        time.sleep(exchange.rateLimit / 1000)  # evitar rate limit
+
+    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     return df
 
 # ========== Aplicar indicadores ==========
@@ -152,7 +152,7 @@ def backtest(df, rsi_overbought, rsi_oversold, initial_capital=10000, leverage=1
 
     return pd.DataFrame(trades)
 
-# ========== Curva de Capital ==========
+# ========== Gráfico de Capital ==========
 def plot_equity(trades):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=trades['exit_time'], y=trades['capital'], mode='lines+markers', name='Capital'))
@@ -160,14 +160,14 @@ def plot_equity(trades):
     return fig
 
 # ========== Streamlit App ==========
-st.set_page_config(page_title="RSI + EMA Backtest (Alavancado)", layout="wide")
-st.title("📊 Backtest: RSI 3 + EMAs com Reinvestimento e Alavancagem")
+st.set_page_config(page_title="RSI + EMA Backtest com Binance (ccxt)", layout="wide")
+st.title("📊 Backtest RSI 3 + EMAs com dados da Binance (via ccxt)")
 
 # ========== Sidebar ==========
 with st.sidebar:
     st.header("⚙️ Parâmetros")
-    ticker = st.selectbox("Par", ['BTC-USD', 'BNB-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
-    interval = st.selectbox("Tempo Gráfico", ['5m', '15m', '1h', '4h', '1d'], index=3)
+    symbol = st.selectbox("Par", ['BTC/USDT', 'BNB/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'])
+    interval = st.selectbox("Tempo Gráfico", ['5m', '15m', '1h', '4h', '1d'], index=2)
     start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=30))
     end_date = st.date_input("Data Final", datetime.date.today())
     initial_capital = st.number_input("Capital Inicial (USD)", value=10000, min_value=100)
@@ -178,15 +178,12 @@ with st.sidebar:
     ema_short = st.slider("EMA Curta", 3, 20, 6)
     ema_long = st.slider("EMA Longa", 10, 50, 14)
 
-    if interval in ['1m', '5m', '15m']:
-        st.caption("⚠️ Histórico limitado para intervalos curtos.")
-
 # ========== Execução ==========
 if st.button("🚀 Rodar Backtest"):
-    with st.spinner("Buscando dados e executando..."):
-        df = fetch_data(ticker, start_date, end_date, interval)
+    with st.spinner("Carregando dados da Binance e executando..."):
+        df = fetch_binance_ohlcv(symbol, interval, start_date, end_date)
         if df.empty:
-            st.error("❌ Nenhum dado retornado.")
+            st.error("❌ Nenhum dado encontrado para o período selecionado.")
         else:
             df = apply_indicators(df, rsi_period, ema_short, ema_long)
             trades = backtest(df, rsi_overbought, rsi_oversold, initial_capital, leverage)
@@ -213,8 +210,8 @@ if st.button("🚀 Rodar Backtest"):
                 st.dataframe(trades)
 
                 csv = trades.to_csv(index=False).encode("utf-8")
-                st.download_button("📥 Baixar CSV", data=csv, file_name="backtest_rsi_ema.csv", mime="text/csv")
+                st.download_button("📥 Baixar CSV", data=csv, file_name="backtest_binance_rsi_ema.csv", mime="text/csv")
             else:
-                st.warning("⚠️ Nenhuma operação encontrada com os parâmetros definidos.")
+                st.warning("⚠️ Nenhuma operação encontrada.")
 else:
     st.info("Configure os parâmetros e clique em **Rodar Backtest**.")
