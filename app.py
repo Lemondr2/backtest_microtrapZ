@@ -8,26 +8,38 @@ from ta.trend import EMAIndicator
 import ccxt
 import time
 
-# ========== Coleta de dados da Binance via CCXT ==========
+# ========== Coleta de dados via ccxt Binance ==========
 @st.cache_data(show_spinner=True)
 def fetch_binance_ohlcv(symbol='BTC/USDT', interval='1h', start_date=None, end_date=None):
-    exchange = ccxt.binance()
-    since = exchange.parse8601(f'{start_date.isoformat()}T00:00:00Z')
-    now = exchange.parse8601(f'{end_date.isoformat()}T00:00:00Z')
-    ohlcv = []
+    try:
+        exchange = ccxt.binance({
+            'enableRateLimit': True,
+            'options': {'adjustForTimeDifference': True},
+            'headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+            }
+        })
 
-    limit = 1000  # candles por chamada
-    while since < now:
-        batch = exchange.fetch_ohlcv(symbol, timeframe=interval, since=since, limit=limit)
-        if not batch:
-            break
-        ohlcv += batch
-        since = batch[-1][0] + 1
-        time.sleep(exchange.rateLimit / 1000)  # evitar rate limit
+        since = exchange.parse8601(f'{start_date.isoformat()}T00:00:00Z')
+        now = exchange.parse8601(f'{end_date.isoformat()}T00:00:00Z')
+        ohlcv = []
+        limit = 1000
 
-    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    return df
+        while since < now:
+            batch = exchange.fetch_ohlcv(symbol, timeframe=interval, since=since, limit=limit)
+            if not batch:
+                break
+            ohlcv += batch
+            since = batch[-1][0] + 1
+            time.sleep(exchange.rateLimit / 1000)
+
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        return df
+
+    except Exception as e:
+        st.error(f"❌ Erro ao conectar com Binance via ccxt: {e}")
+        return pd.DataFrame()
 
 # ========== Aplicar indicadores ==========
 def apply_indicators(df, rsi_period, ema_short, ema_long):
@@ -166,7 +178,7 @@ st.title("📊 Backtest RSI 3 + EMAs com dados da Binance (via ccxt)")
 # ========== Sidebar ==========
 with st.sidebar:
     st.header("⚙️ Parâmetros")
-    symbol = st.selectbox("Par", ['BTC/USDT', 'BNB/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'])
+    symbol = st.selectbox("Par", ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'])
     interval = st.selectbox("Tempo Gráfico", ['5m', '15m', '1h', '4h', '1d'], index=2)
     start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=30))
     end_date = st.date_input("Data Final", datetime.date.today())
