@@ -36,7 +36,7 @@ def apply_indicators(df, rsi_period, ema_short, ema_long):
     df['ema_long'] = EMAIndicator(df['close'], window=ema_long).ema_indicator()
     return df
 
-# ========== Backtest da Estratégia Corrigida ==========
+# ========== Backtest ==========
 def backtest(df, rsi_overbought, rsi_oversold):
     trades = []
     position = None
@@ -83,13 +83,13 @@ def backtest(df, rsi_overbought, rsi_oversold):
                 continue
 
         if not position:
-            if row['rsi'] < rsi_oversold and row['ema_short'] > row['ema_long'] and row['close'] > row['ema_long']:
+            if row['rsi'] < rsi_oversold and row['ema_short'] > row['ema_long']:
                 position = {
                     'type': 'buy',
                     'entry_price': row['close'],
                     'entry_time': row['timestamp']
                 }
-            elif row['rsi'] > rsi_overbought and row['ema_short'] < row['ema_long'] and row['close'] < row['ema_long']:
+            elif row['rsi'] > rsi_overbought and row['ema_short'] < row['ema_long']:
                 position = {
                     'type': 'sell',
                     'entry_price': row['close'],
@@ -122,12 +122,12 @@ def plot_equity(trades):
 
 # ========== Streamlit App ==========
 st.set_page_config(page_title="RSI + EMA Backtest", layout="wide")
-st.title("📊 Backtest: Estratégia RSI + EMAs (com correção de entrada)")
+st.title("📊 Backtest: Estratégia RSI 3 + EMAs (100% igual ao Pine Script)")
 
 # ========== Sidebar ==========
 with st.sidebar:
     st.header("⚙️ Parâmetros")
-    ticker = st.selectbox("Par", ['BTC-USD', 'BNB-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
+    ticker = st.selectbox("Par", ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
     interval = st.selectbox("Tempo Gráfico", ['5m', '15m', '1h', '4h', '1d'], index=3)
     start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=30))
     end_date = st.date_input("Data Final", datetime.date.today())
