@@ -173,11 +173,11 @@ if st.button("🚀 Rodar Backtest"):
                 valor_final = df['close'].iloc[-1]
                 valorizacao_ativo = ((valor_final - valor_inicial) / valor_inicial) * 100
 
-                st.success(f"""
+    st.success(f"""
 ✅ Total de operações: {total_trades}  
 💰 Lucro líquido: {lucro_total:.2f} USD  
-📈 Lucro percentual da estratégia: {lucro_percentual:.2f}%
-📊 Valorização do ativo: {valorizacao_ativo:.2f}%
+📈 Lucro percentual da estratégia: {lucro_percentual:.2f}%  
+📊 Valorização do ativo: {valorizacao_ativo:.2f}%  
 🏆 Winrate: {winrate}%  
 📊 Payoff: {payoff}
 """)
