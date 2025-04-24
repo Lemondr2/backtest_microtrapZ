@@ -36,10 +36,11 @@ def apply_indicators(df, rsi_period, ema_short, ema_long):
     df['ema_long'] = EMAIndicator(df['close'], window=ema_long).ema_indicator()
     return df
 
-# ========== Backtest ==========
-def backtest(df, rsi_overbought, rsi_oversold, entry_value=10000):
+# ========== Backtest com reinvestimento + alavancagem ==========
+def backtest(df, rsi_overbought, rsi_oversold, initial_capital=10000, leverage=1):
     trades = []
     position = None
+    capital = initial_capital
     df = df.copy().reset_index(drop=True)
 
     for i in range(1, len(df)):
@@ -51,33 +52,67 @@ def backtest(df, rsi_overbought, rsi_oversold, entry_value=10000):
 
         if position:
             if position['type'] == 'buy' and cross_down:
-                position['exit_price'] = row['close']
-                position['exit_time'] = row['timestamp']
-                position['exit_reason'] = 'ema_cross'
-                trades.append(position)
+                exit_price = row['close']
+                pnl_pct = (exit_price - position['entry_price']) / position['entry_price']
+                pnl = pnl_pct * capital * leverage
+                capital += pnl
+                trades.append({
+                    **position,
+                    'exit_price': exit_price,
+                    'exit_time': row['timestamp'],
+                    'exit_reason': 'ema_cross',
+                    'pnl': pnl,
+                    'capital': capital
+                })
                 position = None
                 continue
+
             elif position['type'] == 'sell' and cross_up:
-                position['exit_price'] = row['close']
-                position['exit_time'] = row['timestamp']
-                position['exit_reason'] = 'ema_cross'
-                trades.append(position)
+                exit_price = row['close']
+                pnl_pct = (position['entry_price'] - exit_price) / position['entry_price']
+                pnl = pnl_pct * capital * leverage
+                capital += pnl
+                trades.append({
+                    **position,
+                    'exit_price': exit_price,
+                    'exit_time': row['timestamp'],
+                    'exit_reason': 'ema_cross',
+                    'pnl': pnl,
+                    'capital': capital
+                })
                 position = None
                 continue
 
         if position:
             if position['type'] == 'buy' and row['rsi'] > rsi_overbought:
-                position['exit_price'] = row['close']
-                position['exit_time'] = row['timestamp']
-                position['exit_reason'] = 'rsi>overbought'
-                trades.append(position)
+                exit_price = row['close']
+                pnl_pct = (exit_price - position['entry_price']) / position['entry_price']
+                pnl = pnl_pct * capital * leverage
+                capital += pnl
+                trades.append({
+                    **position,
+                    'exit_price': exit_price,
+                    'exit_time': row['timestamp'],
+                    'exit_reason': 'rsi>overbought',
+                    'pnl': pnl,
+                    'capital': capital
+                })
                 position = None
                 continue
+
             elif position['type'] == 'sell' and row['rsi'] < rsi_oversold:
-                position['exit_price'] = row['close']
-                position['exit_time'] = row['timestamp']
-                position['exit_reason'] = 'rsi<oversold'
-                trades.append(position)
+                exit_price = row['close']
+                pnl_pct = (position['entry_price'] - exit_price) / position['entry_price']
+                pnl = pnl_pct * capital * leverage
+                capital += pnl
+                trades.append({
+                    **position,
+                    'exit_price': exit_price,
+                    'exit_time': row['timestamp'],
+                    'exit_reason': 'rsi<oversold',
+                    'pnl': pnl,
+                    'capital': capital
+                })
                 position = None
                 continue
 
@@ -88,6 +123,7 @@ def backtest(df, rsi_overbought, rsi_oversold, entry_value=10000):
                     'entry_price': row['close'],
                     'entry_time': row['timestamp']
                 }
+
             elif row['rsi'] > rsi_overbought and row['ema_short'] < row['ema_long']:
                 position = {
                     'type': 'sell',
@@ -96,22 +132,25 @@ def backtest(df, rsi_overbought, rsi_oversold, entry_value=10000):
                 }
 
     if position:
-        position['exit_price'] = df.iloc[-1]['close']
-        position['exit_time'] = df.iloc[-1]['timestamp']
-        position['exit_reason'] = 'final'
-        trades.append(position)
-
-    trades = pd.DataFrame(trades)
-    if not trades.empty:
-        trades['pnl_pct'] = np.where(
-            trades['type'] == 'buy',
-            (trades['exit_price'] - trades['entry_price']) / trades['entry_price'],
-            (trades['entry_price'] - trades['exit_price']) / trades['entry_price']
+        row = df.iloc[-1]
+        exit_price = row['close']
+        pnl_pct = (
+            (exit_price - position['entry_price']) / position['entry_price']
+            if position['type'] == 'buy'
+            else (position['entry_price'] - exit_price) / position['entry_price']
         )
-        trades['pnl'] = trades['pnl_pct'] * entry_value
-        trades['capital'] = entry_value + trades['pnl'].cumsum()
+        pnl = pnl_pct * capital * leverage
+        capital += pnl
+        trades.append({
+            **position,
+            'exit_price': exit_price,
+            'exit_time': row['timestamp'],
+            'exit_reason': 'final',
+            'pnl': pnl,
+            'capital': capital
+        })
 
-    return trades
+    return pd.DataFrame(trades)
 
 # ========== Curva de Capital ==========
 def plot_equity(trades):
@@ -121,17 +160,18 @@ def plot_equity(trades):
     return fig
 
 # ========== Streamlit App ==========
-st.set_page_config(page_title="RSI + EMA Backtest", layout="wide")
-st.title("📊 Backtest: Estratégia RSI 3 + EMAs (com valor de entrada customizável)")
+st.set_page_config(page_title="RSI + EMA Backtest (Alavancado)", layout="wide")
+st.title("📊 Backtest: RSI 3 + EMAs com Reinvestimento e Alavancagem")
 
 # ========== Sidebar ==========
 with st.sidebar:
     st.header("⚙️ Parâmetros")
-    ticker = st.selectbox("Par", ['BTC-USD', 'BNB-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
+    ticker = st.selectbox("Par", ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
     interval = st.selectbox("Tempo Gráfico", ['5m', '15m', '1h', '4h', '1d'], index=3)
     start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=30))
     end_date = st.date_input("Data Final", datetime.date.today())
-    entry_value = st.number_input("Valor por operação (USD)", value=10000, min_value=100)
+    initial_capital = st.number_input("Capital Inicial (USD)", value=10000, min_value=100)
+    leverage = st.slider("Alavancagem (x)", 1, 15, 1)
     rsi_period = st.slider("RSI Período", 2, 14, 3)
     rsi_oversold = st.slider("RSI Sobrevendido", 10, 40, 30)
     rsi_overbought = st.slider("RSI Sobrecomprado", 60, 90, 70)
@@ -139,7 +179,7 @@ with st.sidebar:
     ema_long = st.slider("EMA Longa", 10, 50, 14)
 
     if interval in ['1m', '5m', '15m']:
-        st.caption("⚠️ Intervalos intradiários têm limite de histórico (máx. 30 dias no yFinance).")
+        st.caption("⚠️ Histórico limitado para intervalos curtos.")
 
 # ========== Execução ==========
 if st.button("🚀 Rodar Backtest"):
@@ -149,21 +189,22 @@ if st.button("🚀 Rodar Backtest"):
             st.error("❌ Nenhum dado retornado.")
         else:
             df = apply_indicators(df, rsi_period, ema_short, ema_long)
-            trades = backtest(df, rsi_overbought, rsi_oversold, entry_value)
+            trades = backtest(df, rsi_overbought, rsi_oversold, initial_capital, leverage)
 
             if not trades.empty:
+                final_capital = trades['capital'].iloc[-1]
+                lucro_total = final_capital - initial_capital
+                lucro_percentual = (lucro_total / initial_capital) * 100
                 total_trades = len(trades)
-                lucro_total = round(trades['pnl'].sum(), 2)
                 wins = trades[trades['pnl'] > 0]
                 losses = trades[trades['pnl'] < 0]
                 winrate = round((len(wins) / total_trades) * 100, 2)
                 payoff = round(wins['pnl'].mean() / abs(losses['pnl'].mean()), 2) if not losses.empty else 0
 
-lucro_percentual = (lucro_total / entry_value) * 100              
-st.success(f"""
+                st.success(f"""
 ✅ Total de operações: {total_trades}  
-💰 Lucro líquido: {lucro_total:.2f} USD
-📈 Lucro percentual: {lucro_percentual:.2f}%   
+💰 Lucro líquido: {lucro_total:.2f} USD  
+📈 Lucro percentual: {lucro_percentual:.2f}%  
 🏆 Winrate: {winrate}%  
 📊 Payoff: {payoff}
 """)
@@ -176,4 +217,4 @@ st.success(f"""
             else:
                 st.warning("⚠️ Nenhuma operação encontrada com os parâmetros definidos.")
 else:
-    st.info("Configure os parâmetros no menu lateral e clique em **Rodar Backtest**.")
+    st.info("Configure os parâmetros e clique em **Rodar Backtest**.")
