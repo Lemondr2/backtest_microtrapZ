@@ -136,7 +136,7 @@ st.title("📊 Backtest RSI 3 + EMAs com dados da KuCoin (via ccxt)")
 # ========== Sidebar ==========
 with st.sidebar:
     st.header("⚙️ Parâmetros")
-    symbol = st.selectbox("Par", ['BTC/USDT', 'BNB-USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'])
+    symbol = st.selectbox("Par", ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'])
     interval = st.selectbox("Tempo Gráfico", ['5m', '15m', '1h', '4h', '1d'], index=2)
     start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=30))
     end_date = st.date_input("Data Final", datetime.date.today())
@@ -167,13 +167,13 @@ if st.button("🚀 Rodar Backtest"):
                 losses = trades[trades['pnl'] < 0]
                 winrate = round((len(wins) / total_trades) * 100, 2)
                 payoff = round(wins['pnl'].mean() / abs(losses['pnl'].mean()), 2) if not losses.empty else 0
-            
-                # 🔥 NOVO: cálculo da valorização do ativo
+
+                # 📈 Valorização do ativo
                 valor_inicial = df['close'].iloc[0]
                 valor_final = df['close'].iloc[-1]
                 valorizacao_ativo = ((valor_final - valor_inicial) / valor_inicial) * 100
 
-    st.success(f"""
+                st.success(f"""
 ✅ Total de operações: {total_trades}  
 💰 Lucro líquido: {lucro_total:.2f} USD  
 📈 Lucro percentual da estratégia: {lucro_percentual:.2f}%  
