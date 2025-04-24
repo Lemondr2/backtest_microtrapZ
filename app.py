@@ -7,174 +7,180 @@ import plotly.graph_objects as go
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator
 
-# ==============================
-# Função para buscar os dados
-# ==============================
-
+# ========== Coleta de dados ==========
 @st.cache_data(show_spinner=True)
-def fetch_data(ticker, start_date, end_date):
+def fetch_data(ticker, start_date, end_date, interval):
     df = yf.download(
         ticker,
         start=start_date,
         end=end_date + datetime.timedelta(days=1),
-        interval='4h',
+        interval=interval,
         progress=False
     )
     if df.empty:
         return df
     df.reset_index(inplace=True)
-    df.rename(columns={'Datetime': 'timestamp'}, inplace=True)
-    df = df[['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']]
+    if 'Datetime' in df.columns:
+        df.rename(columns={'Datetime': 'timestamp'}, inplace=True)
+    elif 'Date' in df.columns:
+        df.rename(columns={'Date': 'timestamp'}, inplace=True)
+
+    df = df[['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']].copy()
     df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
     return df
 
-# ==============================
-# Estratégia RSI + EMAs
-# ==============================
-
-def apply_indicators(df):
-    df['rsi'] = RSIIndicator(df['close'], window=3).rsi()
-    df['ema_6'] = EMAIndicator(df['close'], window=6).ema_indicator()
-    df['ema_14'] = EMAIndicator(df['close'], window=14).ema_indicator()
+# ========== Aplicar indicadores ==========
+def apply_indicators(df, rsi_period, ema_short, ema_long):
+    df['rsi'] = RSIIndicator(df['close'], window=rsi_period).rsi()
+    df['ema_short'] = EMAIndicator(df['close'], window=ema_short).ema_indicator()
+    df['ema_long'] = EMAIndicator(df['close'], window=ema_long).ema_indicator()
     return df
 
-def backtest_rsi_strategy(df, capital=10000):
-    df = df.copy().reset_index(drop=True)
+# ========== Backtest da Estratégia ==========
+def backtest(df, rsi_period, rsi_overbought, rsi_oversold):
     position = None
-    results = []
-    stop_price = None
-    capital_series = []
+    trades = []
+    capital = 10000
+    df = df.copy().reset_index(drop=True)
 
     for i in range(1, len(df)):
         row = df.iloc[i]
-        prev_row = df.iloc[i - 1]
+        prev = df.iloc[i - 1]
 
-        ema_cross_up = df['ema_6'][i - 1] < df['ema_14'][i - 1] and df['ema_6'][i] >= df['ema_14'][i]
-        ema_cross_down = df['ema_6'][i - 1] > df['ema_14'][i - 1] and df['ema_6'][i] <= df['ema_14'][i]
+        # Checar cruzamento de EMAs
+        cross_up = df['ema_short'][i - 1] < df['ema_long'][i - 1] and df['ema_short'][i] >= df['ema_long'][i]
+        cross_down = df['ema_short'][i - 1] > df['ema_long'][i - 1] and df['ema_short'][i] <= df['ema_long'][i]
 
-        # Stop por cruzamento de médias
+        # Stop por cruzamento
         if position:
-            if position['type'] == 'buy' and ema_cross_down:
-                stop_price = row['low']
-                if row['close'] <= stop_price:
-                    results.append({**position, 'exit_reason': 'stop_cross', 'exit_price': stop_price, 'exit_time': row['timestamp']})
-                    position = None
-                    continue
-            elif position['type'] == 'sell' and ema_cross_up:
-                stop_price = row['high']
-                if row['close'] >= stop_price:
-                    results.append({**position, 'exit_reason': 'stop_cross', 'exit_price': stop_price, 'exit_time': row['timestamp']})
-                    position = None
-                    continue
-
-        # Saída por RSI
-        if position:
-            if position['type'] == 'buy' and prev_row['rsi'] > 70:
-                results.append({**position, 'exit_reason': 'rsi>70', 'exit_price': row['open'], 'exit_time': row['timestamp']})
+            if position['type'] == 'buy' and cross_down:
+                position['exit_price'] = row['close']
+                position['exit_time'] = row['timestamp']
+                position['exit_reason'] = 'ema_cross'
+                trades.append(position)
                 position = None
                 continue
-            elif position['type'] == 'sell' and prev_row['rsi'] < 30:
-                results.append({**position, 'exit_reason': 'rsi<30', 'exit_price': row['open'], 'exit_time': row['timestamp']})
+            elif position['type'] == 'sell' and cross_up:
+                position['exit_price'] = row['close']
+                position['exit_time'] = row['timestamp']
+                position['exit_reason'] = 'ema_cross'
+                trades.append(position)
+                position = None
+                continue
+
+        # Saída normal
+        if position:
+            if position['type'] == 'buy' and row['rsi'] > rsi_overbought:
+                position['exit_price'] = row['close']
+                position['exit_time'] = row['timestamp']
+                position['exit_reason'] = 'rsi>70'
+                trades.append(position)
+                position = None
+                continue
+            elif position['type'] == 'sell' and row['rsi'] < rsi_oversold:
+                position['exit_price'] = row['close']
+                position['exit_time'] = row['timestamp']
+                position['exit_reason'] = 'rsi<30'
+                trades.append(position)
                 position = None
                 continue
 
         # Entrada comprada
         if not position:
-            if prev_row['rsi'] < 30 and prev_row['close'] > prev_row['ema_6'] > prev_row['ema_14']:
+            if (
+                row['rsi'] < rsi_oversold
+                and row['close'] > row['ema_short'] > row['ema_long']
+            ):
                 position = {
                     'type': 'buy',
-                    'entry_price': row['open'],
+                    'entry_price': row['close'],
                     'entry_time': row['timestamp']
                 }
-                continue
 
-            # Entrada vendida
-            if prev_row['rsi'] > 70 and prev_row['close'] < prev_row['ema_6'] < prev_row['ema_14']:
+        # Entrada vendida
+        if not position:
+            if (
+                row['rsi'] > rsi_overbought
+                and row['close'] < row['ema_short'] < row['ema_long']
+            ):
                 position = {
                     'type': 'sell',
-                    'entry_price': row['open'],
+                    'entry_price': row['close'],
                     'entry_time': row['timestamp']
                 }
-                continue
 
-    # Fechar operação aberta no final do dataset
     if position:
-        position['exit_reason'] = 'final'
         position['exit_price'] = df.iloc[-1]['close']
         position['exit_time'] = df.iloc[-1]['timestamp']
-        results.append(position)
+        position['exit_reason'] = 'final'
+        trades.append(position)
 
-    # Resultados em DataFrame
-    trades = pd.DataFrame(results)
+    # Resultado
+    trades = pd.DataFrame(trades)
     if not trades.empty:
         trades['pnl'] = np.where(
             trades['type'] == 'buy',
             trades['exit_price'] - trades['entry_price'],
             trades['entry_price'] - trades['exit_price']
         )
-        trades['pnl_usd'] = trades['pnl']
-        trades['capital'] = capital + trades['pnl_usd'].cumsum()
+        trades['capital'] = capital + trades['pnl'].cumsum()
 
     return trades
 
-# ==============================
-# Plot da Curva de Capital
-# ==============================
-
+# ========== Curva de Capital ==========
 def plot_equity(trades):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=trades['exit_time'], y=trades['capital'], mode='lines+markers', name='Capital'))
     fig.update_layout(title='📈 Curva de Capital', xaxis_title='Data', yaxis_title='Capital (USD)')
     return fig
 
-# ==============================
-# Streamlit App
-# ==============================
+# ========== Streamlit App ==========
+st.set_page_config(page_title="RSI + EMA Backtest (4h)", layout="wide")
+st.title("📊 Backtest: Estratégia RSI 3 com EMAs (Gráfico 4h)")
 
-st.set_page_config(page_title="Backtest RSI 3p com EMAs", layout="wide")
-st.title("📊 Backtest: Estratégia RSI 3 + EMAs (4H)")
-st.markdown("📈 Estratégia baseada em sobrecompra/sobrevenda do RSI 3 períodos com contexto de EMAs e stop por cruzamento.")
-
-# Sidebar
+# ========== Sidebar ==========
 with st.sidebar:
-    st.header("⚙️ Configurações")
-    ticker = st.selectbox("Par de Moeda", ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
+    st.header("⚙️ Parâmetros")
+    ticker = st.selectbox("Par", ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
+    interval = st.selectbox("Tempo Gráfico", ['4h'], index=0)
     start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=90))
     end_date = st.date_input("Data Final", datetime.date.today())
-    capital = st.number_input("Capital Inicial (USD)", value=10000)
+    rsi_period = st.slider("RSI Período", 2, 14, 3)
+    rsi_oversold = st.slider("RSI Sobrevendido", 10, 40, 30)
+    rsi_overbought = st.slider("RSI Sobrecomprado", 60, 90, 70)
+    ema_short = st.slider("EMA Curta", 3, 20, 6)
+    ema_long = st.slider("EMA Longa", 10, 50, 14)
 
-# Execução
+# ========== Execução ==========
 if st.button("🚀 Rodar Backtest"):
-    with st.spinner("Buscando dados e executando estratégia..."):
-        df = fetch_data(ticker, start_date, end_date)
-
+    with st.spinner("Buscando dados e executando backtest..."):
+        df = fetch_data(ticker, start_date, end_date, interval)
         if df.empty:
-            st.error("❌ Nenhum dado encontrado para o período selecionado.")
+            st.error("❌ Nenhum dado retornado para o período selecionado.")
         else:
-            df = apply_indicators(df)
-            trades = backtest_rsi_strategy(df, capital)
+            df = apply_indicators(df, rsi_period, ema_short, ema_long)
+            trades = backtest(df, rsi_period, rsi_overbought, rsi_oversold)
 
             if not trades.empty:
-                lucro_total = round(trades['pnl_usd'].sum(), 2)
-                win_trades = trades[trades['pnl_usd'] > 0]
-                loss_trades = trades[trades['pnl_usd'] < 0]
-                winrate = round(len(win_trades) / len(trades) * 100, 2)
-                payoff = round(win_trades['pnl_usd'].mean() / abs(loss_trades['pnl_usd'].mean()), 2) if not loss_trades.empty else 0
+                total_trades = len(trades)
+                lucro_total = round(trades['pnl'].sum(), 2)
+                wins = trades[trades['pnl'] > 0]
+                losses = trades[trades['pnl'] < 0]
+                winrate = round((len(wins) / total_trades) * 100, 2)
+                payoff = round(wins['pnl'].mean() / abs(losses['pnl'].mean()), 2) if not losses.empty else 0
 
                 st.success(f"""
-✅ Total de operações: {len(trades)}  
-💰 Lucro líquido: {lucro_total} USD  
+✅ Total de operações: {total_trades}  
+💰 Lucro líquido: {lucro_total:.2f} USD  
 🏆 Winrate: {winrate}%  
 📊 Payoff: {payoff}
 """)
-
                 st.plotly_chart(plot_equity(trades), use_container_width=True)
-                st.subheader("📜 Operações Executadas")
                 st.dataframe(trades)
 
                 csv = trades.to_csv(index=False).encode("utf-8")
-                st.download_button("📥 Baixar Resultados (.CSV)", data=csv, file_name="backtest_rsi3_emas.csv", mime="text/csv")
+                st.download_button("📥 Baixar CSV", data=csv, file_name="backtest_rsi_ema.csv", mime="text/csv")
             else:
-                st.warning("⚠️ Nenhuma operação foi encontrada com os parâmetros atuais.")
+                st.warning("⚠️ Nenhuma operação encontrada com os parâmetros definidos.")
 else:
     st.info("Configure os parâmetros no menu lateral e clique em **Rodar Backtest**.")
