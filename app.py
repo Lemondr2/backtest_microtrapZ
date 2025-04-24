@@ -159,9 +159,11 @@ if st.button("🚀 Rodar Backtest"):
                 winrate = round((len(wins) / total_trades) * 100, 2)
                 payoff = round(wins['pnl'].mean() / abs(losses['pnl'].mean()), 2) if not losses.empty else 0
 
-                st.success(f"""
+lucro_percentual = (lucro_total / entry_value) * 100              
+st.success(f"""
 ✅ Total de operações: {total_trades}  
-💰 Lucro líquido: {lucro_total:.2f} USD  
+💰 Lucro líquido: {lucro_total:.2f} USD
+📈 Lucro percentual: {lucro_percentual:.2f}%   
 🏆 Winrate: {winrate}%  
 📊 Payoff: {payoff}
 """)
