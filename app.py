@@ -8,11 +8,11 @@ from ta.trend import EMAIndicator
 import ccxt
 import time
 
-# ========== Coleta de dados via ccxt Binance ==========
+# ========== Coleta de dados via ccxt (BYBIT) ==========
 @st.cache_data(show_spinner=True)
-def fetch_binance_ohlcv(symbol='BTC/USDT', interval='1h', start_date=None, end_date=None):
+def fetch_bybit_ohlcv(symbol='BTC/USDT', interval='1h', start_date=None, end_date=None):
     try:
-        exchange = ccxt.binance({
+        exchange = ccxt.bybit({
             'enableRateLimit': True,
             'options': {'adjustForTimeDifference': True},
             'headers': {
@@ -38,7 +38,7 @@ def fetch_binance_ohlcv(symbol='BTC/USDT', interval='1h', start_date=None, end_d
         return df
 
     except Exception as e:
-        st.error(f"❌ Erro ao conectar com Binance via ccxt: {e}")
+        st.error(f"❌ Erro ao conectar com Bybit via ccxt: {e}")
         return pd.DataFrame()
 
 # ========== Aplicar indicadores ==========
@@ -172,8 +172,8 @@ def plot_equity(trades):
     return fig
 
 # ========== Streamlit App ==========
-st.set_page_config(page_title="RSI + EMA Backtest com Binance (ccxt)", layout="wide")
-st.title("📊 Backtest RSI 3 + EMAs com dados da Binance (via ccxt)")
+st.set_page_config(page_title="Backtest RSI + EMAs (Bybit)", layout="wide")
+st.title("📊 Backtest RSI 3 + EMAs com dados da Bybit (via ccxt)")
 
 # ========== Sidebar ==========
 with st.sidebar:
@@ -192,8 +192,8 @@ with st.sidebar:
 
 # ========== Execução ==========
 if st.button("🚀 Rodar Backtest"):
-    with st.spinner("Carregando dados da Binance e executando..."):
-        df = fetch_binance_ohlcv(symbol, interval, start_date, end_date)
+    with st.spinner("Carregando dados da Bybit e executando..."):
+        df = fetch_bybit_ohlcv(symbol, interval, start_date, end_date)
         if df.empty:
             st.error("❌ Nenhum dado encontrado para o período selecionado.")
         else:
@@ -222,7 +222,7 @@ if st.button("🚀 Rodar Backtest"):
                 st.dataframe(trades)
 
                 csv = trades.to_csv(index=False).encode("utf-8")
-                st.download_button("📥 Baixar CSV", data=csv, file_name="backtest_binance_rsi_ema.csv", mime="text/csv")
+                st.download_button("📥 Baixar CSV", data=csv, file_name="backtest_bybit_rsi_ema.csv", mime="text/csv")
             else:
                 st.warning("⚠️ Nenhuma operação encontrada.")
 else:
