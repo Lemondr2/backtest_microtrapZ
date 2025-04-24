@@ -36,7 +36,7 @@ def apply_indicators(df, rsi_period, ema_short, ema_long):
     df['ema_long'] = EMAIndicator(df['close'], window=ema_long).ema_indicator()
     return df
 
-# ========== Backtest da Estratégia ==========
+# ========== Backtest ==========
 def backtest(df, rsi_period, rsi_overbought, rsi_oversold):
     position = None
     trades = []
@@ -47,11 +47,9 @@ def backtest(df, rsi_period, rsi_overbought, rsi_oversold):
         row = df.iloc[i]
         prev = df.iloc[i - 1]
 
-        # Checar cruzamento de EMAs
         cross_up = df['ema_short'][i - 1] < df['ema_long'][i - 1] and df['ema_short'][i] >= df['ema_long'][i]
         cross_down = df['ema_short'][i - 1] > df['ema_long'][i - 1] and df['ema_short'][i] <= df['ema_long'][i]
 
-        # Stop por cruzamento
         if position:
             if position['type'] == 'buy' and cross_down:
                 position['exit_price'] = row['close']
@@ -68,7 +66,6 @@ def backtest(df, rsi_period, rsi_overbought, rsi_oversold):
                 position = None
                 continue
 
-        # Saída normal
         if position:
             if position['type'] == 'buy' and row['rsi'] > rsi_overbought:
                 position['exit_price'] = row['close']
@@ -85,7 +82,6 @@ def backtest(df, rsi_period, rsi_overbought, rsi_oversold):
                 position = None
                 continue
 
-        # Entrada comprada
         if not position:
             if (
                 row['rsi'] < rsi_oversold
@@ -97,9 +93,7 @@ def backtest(df, rsi_period, rsi_overbought, rsi_oversold):
                     'entry_time': row['timestamp']
                 }
 
-        # Entrada vendida
-        if not position:
-            if (
+            elif (
                 row['rsi'] > rsi_overbought
                 and row['close'] < row['ema_short'] < row['ema_long']
             ):
@@ -115,7 +109,6 @@ def backtest(df, rsi_period, rsi_overbought, rsi_oversold):
         position['exit_reason'] = 'final'
         trades.append(position)
 
-    # Resultado
     trades = pd.DataFrame(trades)
     if not trades.empty:
         trades['pnl'] = np.where(
@@ -135,21 +128,24 @@ def plot_equity(trades):
     return fig
 
 # ========== Streamlit App ==========
-st.set_page_config(page_title="RSI + EMA Backtest (4h)", layout="wide")
-st.title("📊 Backtest: Estratégia RSI 3 com EMAs (Gráfico 4h)")
+st.set_page_config(page_title="RSI + EMA Backtest", layout="wide")
+st.title("📊 Backtest: Estratégia RSI 3 + EMAs")
 
 # ========== Sidebar ==========
 with st.sidebar:
     st.header("⚙️ Parâmetros")
     ticker = st.selectbox("Par", ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
-    interval = st.selectbox("Tempo Gráfico", ['4h'], index=0)
-    start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=90))
+    interval = st.selectbox("Tempo Gráfico", ['5m', '15m', '1h', '4h', '1d'], index=3)
+    start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=30))
     end_date = st.date_input("Data Final", datetime.date.today())
     rsi_period = st.slider("RSI Período", 2, 14, 3)
     rsi_oversold = st.slider("RSI Sobrevendido", 10, 40, 30)
     rsi_overbought = st.slider("RSI Sobrecomprado", 60, 90, 70)
     ema_short = st.slider("EMA Curta", 3, 20, 6)
     ema_long = st.slider("EMA Longa", 10, 50, 14)
+
+    if interval in ['1m', '5m', '15m']:
+        st.caption("⚠️ Intervalos intradiários podem ter no máximo 30 dias de dados históricos.")
 
 # ========== Execução ==========
 if st.button("🚀 Rodar Backtest"):
@@ -176,6 +172,7 @@ if st.button("🚀 Rodar Backtest"):
 📊 Payoff: {payoff}
 """)
                 st.plotly_chart(plot_equity(trades), use_container_width=True)
+                st.subheader("📜 Operações Executadas")
                 st.dataframe(trades)
 
                 csv = trades.to_csv(index=False).encode("utf-8")
