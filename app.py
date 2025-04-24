@@ -167,11 +167,17 @@ if st.button("🚀 Rodar Backtest"):
                 losses = trades[trades['pnl'] < 0]
                 winrate = round((len(wins) / total_trades) * 100, 2)
                 payoff = round(wins['pnl'].mean() / abs(losses['pnl'].mean()), 2) if not losses.empty else 0
+            
+                # 🔥 NOVO: cálculo da valorização do ativo
+                valor_inicial = df['close'].iloc[0]
+                valor_final = df['close'].iloc[-1]
+                valorizacao_ativo = ((valor_final - valor_inicial) / valor_inicial) * 100
 
                 st.success(f"""
 ✅ Total de operações: {total_trades}  
 💰 Lucro líquido: {lucro_total:.2f} USD  
-📈 Lucro percentual: {lucro_percentual:.2f}%  
+📈 Lucro percentual da estratégia: {lucro_percentual:.2f}%
+📊 Valorização do ativo: {valorizacao_ativo:.2f}%
 🏆 Winrate: {winrate}%  
 📊 Payoff: {payoff}
 """)
