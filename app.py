@@ -136,8 +136,8 @@ st.title("📊 Backtest RSI 3 + EMAs com dados da KuCoin (via ccxt)")
 # ========== Sidebar ==========
 with st.sidebar:
     st.header("⚙️ Parâmetros")
-    symbol = st.selectbox("Par", ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'])
-    interval = st.selectbox("Tempo Gráfico", ['5m', '15m', '1h', '4h', '1d'], index=2)
+    symbol = st.selectbox("Par", ['BTC/USDT', 'BNB/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'])
+    interval = st.selectbox("Tempo Gráfico", ['1m', '5m', '15m', '1h', '4h', '1d'], index=2)
     start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=30))
     end_date = st.date_input("Data Final", datetime.date.today())
     initial_capital = st.number_input("Capital Inicial (USD)", value=10000, min_value=100)
