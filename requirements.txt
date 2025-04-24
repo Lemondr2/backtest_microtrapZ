@@ -1,6 +1,6 @@
 ﻿streamlit
 pandas
 numpy
-ta
+ta==0.10.2
 plotly
 ccxt
