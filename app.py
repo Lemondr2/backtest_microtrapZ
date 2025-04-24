@@ -36,10 +36,10 @@ def apply_indicators(df, rsi_period, ema_short, ema_long):
     df['ema_long'] = EMAIndicator(df['close'], window=ema_long).ema_indicator()
     return df
 
-# ========== Backtest ==========
-def backtest(df, rsi_period, rsi_overbought, rsi_oversold):
-    position = None
+# ========== Backtest da Estratégia Corrigida ==========
+def backtest(df, rsi_overbought, rsi_oversold):
     trades = []
+    position = None
     capital = 10000
     df = df.copy().reset_index(drop=True)
 
@@ -47,8 +47,8 @@ def backtest(df, rsi_period, rsi_overbought, rsi_oversold):
         row = df.iloc[i]
         prev = df.iloc[i - 1]
 
-        cross_up = df['ema_short'][i - 1] < df['ema_long'][i - 1] and df['ema_short'][i] >= df['ema_long'][i]
-        cross_down = df['ema_short'][i - 1] > df['ema_long'][i - 1] and df['ema_short'][i] <= df['ema_long'][i]
+        cross_up = prev['ema_short'] < prev['ema_long'] and row['ema_short'] >= row['ema_long']
+        cross_down = prev['ema_short'] > prev['ema_long'] and row['ema_short'] <= row['ema_long']
 
         if position:
             if position['type'] == 'buy' and cross_down:
@@ -70,33 +70,26 @@ def backtest(df, rsi_period, rsi_overbought, rsi_oversold):
             if position['type'] == 'buy' and row['rsi'] > rsi_overbought:
                 position['exit_price'] = row['close']
                 position['exit_time'] = row['timestamp']
-                position['exit_reason'] = 'rsi>70'
+                position['exit_reason'] = 'rsi>overbought'
                 trades.append(position)
                 position = None
                 continue
             elif position['type'] == 'sell' and row['rsi'] < rsi_oversold:
                 position['exit_price'] = row['close']
                 position['exit_time'] = row['timestamp']
-                position['exit_reason'] = 'rsi<30'
+                position['exit_reason'] = 'rsi<oversold'
                 trades.append(position)
                 position = None
                 continue
 
         if not position:
-            if (
-                row['rsi'] < rsi_oversold
-                and row['close'] > row['ema_short'] > row['ema_long']
-            ):
+            if row['rsi'] < rsi_oversold and row['ema_short'] > row['ema_long'] and row['close'] > row['ema_long']:
                 position = {
                     'type': 'buy',
                     'entry_price': row['close'],
                     'entry_time': row['timestamp']
                 }
-
-            elif (
-                row['rsi'] > rsi_overbought
-                and row['close'] < row['ema_short'] < row['ema_long']
-            ):
+            elif row['rsi'] > rsi_overbought and row['ema_short'] < row['ema_long'] and row['close'] < row['ema_long']:
                 position = {
                     'type': 'sell',
                     'entry_price': row['close'],
@@ -129,12 +122,12 @@ def plot_equity(trades):
 
 # ========== Streamlit App ==========
 st.set_page_config(page_title="RSI + EMA Backtest", layout="wide")
-st.title("📊 Backtest: Estratégia RSI 3 + EMAs")
+st.title("📊 Backtest: Estratégia RSI + EMAs (com correção de entrada)")
 
 # ========== Sidebar ==========
 with st.sidebar:
     st.header("⚙️ Parâmetros")
-    ticker = st.selectbox("Par", ['BTC-USD', 'BNB-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
+    ticker = st.selectbox("Par", ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
     interval = st.selectbox("Tempo Gráfico", ['5m', '15m', '1h', '4h', '1d'], index=3)
     start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=30))
     end_date = st.date_input("Data Final", datetime.date.today())
@@ -145,17 +138,17 @@ with st.sidebar:
     ema_long = st.slider("EMA Longa", 10, 50, 14)
 
     if interval in ['1m', '5m', '15m']:
-        st.caption("⚠️ Intervalos intradiários podem ter no máximo 30 dias de dados históricos.")
+        st.caption("⚠️ Intervalos intradiários têm limite de histórico (máx. 30 dias no yFinance).")
 
 # ========== Execução ==========
 if st.button("🚀 Rodar Backtest"):
-    with st.spinner("Buscando dados e executando backtest..."):
+    with st.spinner("Buscando dados e executando..."):
         df = fetch_data(ticker, start_date, end_date, interval)
         if df.empty:
-            st.error("❌ Nenhum dado retornado para o período selecionado.")
+            st.error("❌ Nenhum dado retornado.")
         else:
             df = apply_indicators(df, rsi_period, ema_short, ema_long)
-            trades = backtest(df, rsi_period, rsi_overbought, rsi_oversold)
+            trades = backtest(df, rsi_overbought, rsi_oversold)
 
             if not trades.empty:
                 total_trades = len(trades)
