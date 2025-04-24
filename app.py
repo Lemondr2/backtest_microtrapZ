@@ -4,182 +4,177 @@ import pandas as pd
 import numpy as np
 import datetime
 import plotly.graph_objects as go
-from ta.volatility import AverageTrueRange
+from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator
 
-# ==========================
-# Coleta de dados com yfinance
-# ==========================
+# ==============================
+# Função para buscar os dados
+# ==============================
 
 @st.cache_data(show_spinner=True)
-def fetch_yf_data(ticker='BTC-USD', interval='15m', start_date=None, end_date=None):
+def fetch_data(ticker, start_date, end_date):
     df = yf.download(
         ticker,
         start=start_date,
         end=end_date + datetime.timedelta(days=1),
-        interval=interval,
+        interval='4h',
         progress=False
     )
-
     if df.empty:
         return df
-
     df.reset_index(inplace=True)
-    if 'Date' in df.columns:
-        df = df.rename(columns={'Date': 'timestamp'})
-    elif 'Datetime' in df.columns:
-        df = df.rename(columns={'Datetime': 'timestamp'})
-
-    df = df[['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']].copy()
+    df.rename(columns={'Datetime': 'timestamp'}, inplace=True)
+    df = df[['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']]
     df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
     return df
 
-# ==========================
-# Indicadores e Estratégia
-# ==========================
+# ==============================
+# Estratégia RSI + EMAs
+# ==============================
 
-def apply_indicators(df, atr_period=9, ema_short=8, ema_long=20):
-    if df.empty or 'close' not in df.columns or df['close'].isnull().all():
-        raise ValueError("Dados inválidos para aplicar indicadores.")
-    
-    df = df.copy()
-    df['ema_short'] = EMAIndicator(df['close'].fillna(method="ffill"), window=ema_short).ema_indicator()
-    df['ema_long'] = EMAIndicator(df['close'].fillna(method="ffill"), window=ema_long).ema_indicator()
-    
-    atr = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=atr_period)
-    df['atr'] = atr.average_true_range()
+def apply_indicators(df):
+    df['rsi'] = RSIIndicator(df['close'], window=3).rsi()
+    df['ema_6'] = EMAIndicator(df['close'], window=6).ema_indicator()
+    df['ema_14'] = EMAIndicator(df['close'], window=14).ema_indicator()
     return df
 
-def check_microtrap(df, idx):
-    if idx < 3:
-        return None
-    c1, c2, c3, c4 = df.iloc[idx - 3], df.iloc[idx - 2], df.iloc[idx - 1], df.iloc[idx]
-    if c1['low'] < c2['low'] and c3['low'] < c1['low'] and c4['close'] > c3['high']:
-        return 'buy'
-    if c1['high'] > c2['high'] and c3['high'] > c1['high'] and c4['close'] < c3['low']:
-        return 'sell'
-    return None
-
-def backtest(df, risk=0.01, rr=0.8, capital=10000):
-    results = []
+def backtest_rsi_strategy(df, capital=10000):
+    df = df.copy().reset_index(drop=True)
     position = None
+    results = []
+    stop_price = None
+    capital_series = []
 
-    for i in range(20, len(df) - 1):
-        signal = check_microtrap(df, i)
-        trend_up = df['ema_short'][i] > df['ema_long'][i] and df['ema_short'][i] > df['close'][i]
-        trend_down = df['ema_short'][i] < df['ema_long'][i] and df['ema_short'][i] < df['close'][i]
+    for i in range(1, len(df)):
+        row = df.iloc[i]
+        prev_row = df.iloc[i - 1]
 
-        if signal == 'buy' and trend_up:
-            entry = df['close'][i]
-            stop = df['low'][i] - df['atr'][i]
-            target = entry + (entry - stop) * rr
-            position = {'type': 'buy', 'entry': entry, 'stop': stop, 'target': target, 'timestamp': df['timestamp'][i]}
+        ema_cross_up = df['ema_6'][i - 1] < df['ema_14'][i - 1] and df['ema_6'][i] >= df['ema_14'][i]
+        ema_cross_down = df['ema_6'][i - 1] > df['ema_14'][i - 1] and df['ema_6'][i] <= df['ema_14'][i]
 
-        elif signal == 'sell' and trend_down:
-            entry = df['close'][i]
-            stop = df['high'][i] + df['atr'][i]
-            target = entry - (stop - entry) * rr
-            position = {'type': 'sell', 'entry': entry, 'stop': stop, 'target': target, 'timestamp': df['timestamp'][i]}
-
+        # Stop por cruzamento de médias
         if position:
-            next_candle = df.iloc[i + 1]
-            if position['type'] == 'buy':
-                if next_candle['low'] <= position['stop']:
-                    pnl = -risk * capital
-                    results.append({**position, 'exit_price': position['stop'], 'pnl': pnl})
+            if position['type'] == 'buy' and ema_cross_down:
+                stop_price = row['low']
+                if row['close'] <= stop_price:
+                    results.append({**position, 'exit_reason': 'stop_cross', 'exit_price': stop_price, 'exit_time': row['timestamp']})
                     position = None
-                elif next_candle['high'] >= position['target']:
-                    pnl = risk * capital * rr
-                    results.append({**position, 'exit_price': position['target'], 'pnl': pnl})
+                    continue
+            elif position['type'] == 'sell' and ema_cross_up:
+                stop_price = row['high']
+                if row['close'] >= stop_price:
+                    results.append({**position, 'exit_reason': 'stop_cross', 'exit_price': stop_price, 'exit_time': row['timestamp']})
                     position = None
-            elif position['type'] == 'sell':
-                if next_candle['high'] >= position['stop']:
-                    pnl = -risk * capital
-                    results.append({**position, 'exit_price': position['stop'], 'pnl': pnl})
-                    position = None
-                elif next_candle['low'] <= position['target']:
-                    pnl = risk * capital * rr
-                    results.append({**position, 'exit_price': position['target'], 'pnl': pnl})
-                    position = None
+                    continue
 
-    return pd.DataFrame(results)
+        # Saída por RSI
+        if position:
+            if position['type'] == 'buy' and prev_row['rsi'] > 70:
+                results.append({**position, 'exit_reason': 'rsi>70', 'exit_price': row['open'], 'exit_time': row['timestamp']})
+                position = None
+                continue
+            elif position['type'] == 'sell' and prev_row['rsi'] < 30:
+                results.append({**position, 'exit_reason': 'rsi<30', 'exit_price': row['open'], 'exit_time': row['timestamp']})
+                position = None
+                continue
 
-def plot_equity_curve(df):
-    capital = 10000
-    df['capital'] = capital + df['pnl'].cumsum()
+        # Entrada comprada
+        if not position:
+            if prev_row['rsi'] < 30 and prev_row['close'] > prev_row['ema_6'] > prev_row['ema_14']:
+                position = {
+                    'type': 'buy',
+                    'entry_price': row['open'],
+                    'entry_time': row['timestamp']
+                }
+                continue
+
+            # Entrada vendida
+            if prev_row['rsi'] > 70 and prev_row['close'] < prev_row['ema_6'] < prev_row['ema_14']:
+                position = {
+                    'type': 'sell',
+                    'entry_price': row['open'],
+                    'entry_time': row['timestamp']
+                }
+                continue
+
+    # Fechar operação aberta no final do dataset
+    if position:
+        position['exit_reason'] = 'final'
+        position['exit_price'] = df.iloc[-1]['close']
+        position['exit_time'] = df.iloc[-1]['timestamp']
+        results.append(position)
+
+    # Resultados em DataFrame
+    trades = pd.DataFrame(results)
+    if not trades.empty:
+        trades['pnl'] = np.where(
+            trades['type'] == 'buy',
+            trades['exit_price'] - trades['entry_price'],
+            trades['entry_price'] - trades['exit_price']
+        )
+        trades['pnl_usd'] = trades['pnl']
+        trades['capital'] = capital + trades['pnl_usd'].cumsum()
+
+    return trades
+
+# ==============================
+# Plot da Curva de Capital
+# ==============================
+
+def plot_equity(trades):
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df['timestamp'], y=df['capital'], mode='lines+markers', name='Capital'))
-    fig.update_layout(title='Evolução do Capital', xaxis_title='Data', yaxis_title='Capital (USD)')
+    fig.add_trace(go.Scatter(x=trades['exit_time'], y=trades['capital'], mode='lines+markers', name='Capital'))
+    fig.update_layout(title='📈 Curva de Capital', xaxis_title='Data', yaxis_title='Capital (USD)')
     return fig
 
-# ==========================
+# ==============================
 # Streamlit App
-# ==========================
+# ==============================
 
-st.set_page_config(page_title="Backtest Microtrap - yFinance", layout="wide")
-st.title("📊 Backtest: Estratégia Microtrap com yFinance")
-st.markdown("💡 Estratégia baseada em price action (microtrap), médias móveis e ATR. Usando dados do Yahoo Finance.")
+st.set_page_config(page_title="Backtest RSI 3p com EMAs", layout="wide")
+st.title("📊 Backtest: Estratégia RSI 3 + EMAs (4H)")
+st.markdown("📈 Estratégia baseada em sobrecompra/sobrevenda do RSI 3 períodos com contexto de EMAs e stop por cruzamento.")
 
-# Sidebar de configurações
+# Sidebar
 with st.sidebar:
     st.header("⚙️ Configurações")
-    ticker = st.selectbox("Ativo", ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
-    interval = st.selectbox("Tempo Gráfico", ['1m', '5m', '15m', '30m', '1h', '1d'], index=2)
-
-    start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=30))
+    ticker = st.selectbox("Par de Moeda", ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD'])
+    start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=90))
     end_date = st.date_input("Data Final", datetime.date.today())
+    capital = st.number_input("Capital Inicial (USD)", value=10000)
 
-    atr_period = st.slider("Período ATR", 5, 20, 9)
-    ema_short = st.slider("EMA Curta", 5, 15, 8)
-    ema_long = st.slider("EMA Longa", 15, 40, 20)
-    risk = st.slider("Risco por Trade (%)", 0.5, 5.0, 1.0) / 100
-    rr = st.slider("Razão Risco/Retorno", 0.5, 3.0, 0.8)
-
-    if interval in ['1m', '5m', '15m']:
-        st.caption("⚠️ Intervalos intradiários possuem no máximo 30 dias de histórico.")
-
-# Executar backtest
+# Execução
 if st.button("🚀 Rodar Backtest"):
-    with st.spinner("Carregando dados e executando..."):
-        df = fetch_yf_data(ticker=ticker, interval=interval, start_date=start_date, end_date=end_date)
+    with st.spinner("Buscando dados e executando estratégia..."):
+        df = fetch_data(ticker, start_date, end_date)
 
-        try:
-            if df.empty:
-                st.error("❌ Nenhum dado retornado para o período/ativo escolhido.")
-            elif not all(col in df.columns for col in ['open', 'high', 'low', 'close']):
-                st.error("❌ Colunas obrigatórias ausentes nos dados.")
-            elif df['close'].isnull().all():
-                st.error("❌ Todos os valores da coluna 'close' são nulos. Tente outro período ou ativo.")
-            else:
-                df = apply_indicators(df, atr_period=atr_period, ema_short=ema_short, ema_long=ema_long)
-                results = backtest(df, risk=risk, rr=rr)
+        if df.empty:
+            st.error("❌ Nenhum dado encontrado para o período selecionado.")
+        else:
+            df = apply_indicators(df)
+            trades = backtest_rsi_strategy(df, capital)
 
-                if not results.empty:
-                    total_trades = len(results)
-                    net_profit = round(results['pnl'].sum(), 2)
-                    wins = results[results['pnl'] > 0]
-                    losses = results[results['pnl'] < 0]
-                    winrate = round((len(wins) / total_trades) * 100, 2) if total_trades > 0 else 0
-                    avg_win = wins['pnl'].mean() if not wins.empty else 0
-                    avg_loss = abs(losses['pnl'].mean()) if not losses.empty else 0
-                    payoff = round(avg_win / avg_loss, 2) if avg_loss > 0 else 0
+            if not trades.empty:
+                lucro_total = round(trades['pnl_usd'].sum(), 2)
+                win_trades = trades[trades['pnl_usd'] > 0]
+                loss_trades = trades[trades['pnl_usd'] < 0]
+                winrate = round(len(win_trades) / len(trades) * 100, 2)
+                payoff = round(win_trades['pnl_usd'].mean() / abs(loss_trades['pnl_usd'].mean()), 2) if not loss_trades.empty else 0
 
-                    st.success(f"""
-✅ Total de operações: {total_trades}  
-💰 Lucro líquido: {net_profit} USD  
+                st.success(f"""
+✅ Total de operações: {len(trades)}  
+💰 Lucro líquido: {lucro_total} USD  
 🏆 Winrate: {winrate}%  
 📊 Payoff: {payoff}
 """)
 
-                    st.plotly_chart(plot_equity_curve(results), use_container_width=True)
-                    st.subheader("📈 Operações Executadas")
-                    st.dataframe(results)
+                st.plotly_chart(plot_equity(trades), use_container_width=True)
+                st.subheader("📜 Operações Executadas")
+                st.dataframe(trades)
 
-                    csv = results.to_csv(index=False).encode('utf-8')
-                    st.download_button("📥 Baixar CSV", data=csv, file_name="backtest_microtrap.csv", mime='text/csv')
-                else:
-                    st.warning("Nenhuma operação encontrada com os parâmetros definidos.")
-        except Exception as e:
-            st.error(f"❌ Erro inesperado: {e}")
+                csv = trades.to_csv(index=False).encode("utf-8")
+                st.download_button("📥 Baixar Resultados (.CSV)", data=csv, file_name="backtest_rsi3_emas.csv", mime="text/csv")
+            else:
+                st.warning("⚠️ Nenhuma operação foi encontrada com os parâmetros atuais.")
 else:
-    st.info("Configure os parâmetros e clique em **Rodar Backtest**.")
+    st.info("Configure os parâmetros no menu lateral e clique em **Rodar Backtest**.")
