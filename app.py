@@ -37,10 +37,9 @@ def apply_indicators(df, rsi_period, ema_short, ema_long):
     return df
 
 # ========== Backtest ==========
-def backtest(df, rsi_overbought, rsi_oversold):
+def backtest(df, rsi_overbought, rsi_oversold, entry_value=10000):
     trades = []
     position = None
-    capital = 10000
     df = df.copy().reset_index(drop=True)
 
     for i in range(1, len(df)):
@@ -104,12 +103,13 @@ def backtest(df, rsi_overbought, rsi_oversold):
 
     trades = pd.DataFrame(trades)
     if not trades.empty:
-        trades['pnl'] = np.where(
+        trades['pnl_pct'] = np.where(
             trades['type'] == 'buy',
-            trades['exit_price'] - trades['entry_price'],
-            trades['entry_price'] - trades['exit_price']
+            (trades['exit_price'] - trades['entry_price']) / trades['entry_price'],
+            (trades['entry_price'] - trades['exit_price']) / trades['entry_price']
         )
-        trades['capital'] = capital + trades['pnl'].cumsum()
+        trades['pnl'] = trades['pnl_pct'] * entry_value
+        trades['capital'] = entry_value + trades['pnl'].cumsum()
 
     return trades
 
@@ -122,7 +122,7 @@ def plot_equity(trades):
 
 # ========== Streamlit App ==========
 st.set_page_config(page_title="RSI + EMA Backtest", layout="wide")
-st.title("📊 Backtest: Estratégia RSI 3 + EMAs (100% igual ao Pine Script)")
+st.title("📊 Backtest: Estratégia RSI 3 + EMAs (com valor de entrada customizável)")
 
 # ========== Sidebar ==========
 with st.sidebar:
@@ -131,6 +131,7 @@ with st.sidebar:
     interval = st.selectbox("Tempo Gráfico", ['5m', '15m', '1h', '4h', '1d'], index=3)
     start_date = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=30))
     end_date = st.date_input("Data Final", datetime.date.today())
+    entry_value = st.number_input("Valor por operação (USD)", value=10000, min_value=100)
     rsi_period = st.slider("RSI Período", 2, 14, 3)
     rsi_oversold = st.slider("RSI Sobrevendido", 10, 40, 30)
     rsi_overbought = st.slider("RSI Sobrecomprado", 60, 90, 70)
@@ -148,7 +149,7 @@ if st.button("🚀 Rodar Backtest"):
             st.error("❌ Nenhum dado retornado.")
         else:
             df = apply_indicators(df, rsi_period, ema_short, ema_long)
-            trades = backtest(df, rsi_overbought, rsi_oversold)
+            trades = backtest(df, rsi_overbought, rsi_oversold, entry_value)
 
             if not trades.empty:
                 total_trades = len(trades)
